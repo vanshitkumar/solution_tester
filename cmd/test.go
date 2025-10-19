@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
 	"strings"
 	"time"
@@ -15,18 +16,40 @@ import (
 	"github.com/spf13/cobra"
 )
 
-func formatHeading(heading string) string {
-	border := strings.Repeat("#", len(heading)+8)
-	return fmt.Sprintf("%s\n### %s ###\n%s\n", border, heading, border)
+func getInTxt() (bool, string) {
+	data, err := os.ReadFile("in.txt")
+	if err != nil {
+		return false, ""
+	}
+	return true, string(data)
 }
 
-func formatCompilerOutput(output []byte) string {
-	if len(output) > 0 {
-		combinedOutput := formatHeading("Compiler Output")
-		combinedOutput += string(output)
-		return combinedOutput
+const (
+	IN_METHOD_STDIN = iota
+	IN_METHOD_FILE
+	IN_METHOD_SAMPLES
+)
+
+var (
+	inTxtContents string
+)
+
+func printInputMethod(q *Question) int {
+	var hasInTxt bool
+	hasInTxt, inTxtContents = getInTxt()
+	if hasInTxt {
+		printNormal("Input Method: 'in.txt'")
+		return IN_METHOD_FILE
+	} else if q != nil && q.Interactive {
+		printNormal("Input Method: Stdin (Interactive Question)")
+		return IN_METHOD_STDIN
+	} else if q != nil {
+		printNormal("Input Method: Sample Test Cases")
+		return IN_METHOD_SAMPLES
+	} else {
+		printNormal("Input Method: Stdin")
+		return IN_METHOD_STDIN
 	}
-	return ""
 }
 
 func compileFile(fileName string) error {
@@ -35,25 +58,24 @@ func compileFile(fileName string) error {
 	c := exec.Command(parts[0], parts[1:]...)
 
 	output, err := c.CombinedOutput()
-	fmt.Print(formatCompilerOutput(output))
+	printError("Compiler Output", string(output))
 	return err
 }
 
-type Test struct{
-	Input string `json:"input"`
-	Output string `json:"output"`	
+type Test struct {
+	Input  string `json:"input"`
+	Output string `json:"output"`
 }
 
 type Question struct {
-	Name 	  string   `json:"name"`
-	Group 	  string   `json:"group"`
-	Url 	 string   `json:"url"`
-	Interactive bool     `json:"interactive"` // optional
-	TimeLimit   int      `json:"timeLimit"`
-	MemoryLimit int      `json:"memoryLimit"`
-	Tests       []Test   `json:"tests"`	
+	Name        string `json:"name"`
+	Group       string `json:"group"`
+	Url         string `json:"url"`
+	Interactive bool   `json:"interactive"` // optional
+	TimeLimit   int    `json:"timeLimit"`
+	MemoryLimit int    `json:"memoryLimit"`
+	Tests       []Test `json:"tests"`
 }
-
 
 /// OUTPUT FORMATTING GUIDELINES
 /// Each output ends with a newline
@@ -67,19 +89,13 @@ type Question struct {
 func getQuestion() *Question {
 	resp, err := http.Get(fmt.Sprintf("http://localhost:%s/", PORT))
 	if err != nil || resp.StatusCode != 200 {
-		fmt.Print(formatHeading("No Question"))
 		return nil
 	}
 
 	question := Question{}
 	err = json.NewDecoder(resp.Body).Decode(&question)
 	if err != nil {
-		fmt.Print(formatHeading("Failed to parse question"))
 		return nil
-	}
-
-	if question.Interactive{
-		fmt.Print(formatHeading("Interactive Question"))
 	}
 	return &question
 }
@@ -91,10 +107,10 @@ func runTestCase(input string, timeLimit int) (string, error) {
 	var ctx context.Context
 	var cancel context.CancelFunc
 
-	if(timeLimit == -1){
+	if timeLimit == -1 {
 		ctx = context.Background()
-	}else{
-		ctx, cancel = context.WithTimeout(context.Background(),  time.Millisecond * time.Duration(timeLimit))
+	} else {
+		ctx, cancel = context.WithTimeout(context.Background(), time.Millisecond*time.Duration(timeLimit))
 		defer cancel()
 	}
 
@@ -105,12 +121,12 @@ func runTestCase(input string, timeLimit int) (string, error) {
 }
 
 func isWhitespace(c byte) bool {
-    return c == ' ' || c == '\n' || c == '\t' || c == '\r'
+	return c == ' ' || c == '\n' || c == '\t' || c == '\r'
 }
 
 // compares character by character ignoring whitespaces in actual output
 // prints if test passes or fails and returns bool
-func compareOutput(expected, actual string, tcCount int) bool {	
+func compareOutput(expected, actual string) bool {
 	i, j := 0, 0
 	for i < len(expected) && j < len(actual) {
 		if expected[i] == actual[j] {
@@ -119,17 +135,14 @@ func compareOutput(expected, actual string, tcCount int) bool {
 		} else if isWhitespace(actual[j]) {
 			j++
 		} else {
-			fmt.Printf("❌ TEST CASE %d FAILED\n", tcCount)
 			return false
 		}
 	}
 
-	
 	for j < len(actual) {
 		if isWhitespace(actual[j]) {
 			j++
 		} else {
-			fmt.Printf("❌ TEST CASE %d FAILED\n", tcCount)
 			return false
 		}
 	}
@@ -138,12 +151,10 @@ func compareOutput(expected, actual string, tcCount int) bool {
 		if isWhitespace(expected[i]) {
 			i++
 		} else {
-			fmt.Printf("❌ TEST CASE %d FAILED\n", tcCount)
 			return false
 		}
 	}
 
-	fmt.Printf("✅ TEST CASE %d PASSED\n", tcCount)
 	return true
 }
 
@@ -152,56 +163,68 @@ var testCmd = &cobra.Command{
 	Short: "submit your file for testing",
 	Args:  cobra.ExactArgs(1),
 	Run: func(cmd *cobra.Command, args []string) {
+		question := getQuestion()
+		printQuestion(question)
+
 		err := compileFile(args[0])
 		if err != nil {
-			fmt.Print(formatHeading("Compilation Failed"))
+			printRed("Compilation Failed")
 			return
+		} else {
+			printGreen("Compilation Successfull")
 		}
 
-		// here we guranteedly have a compiled file named temp
+		method := printInputMethod(question)
 
-
-		question := getQuestion()
-		if(question != nil){
-			fmt.Printf("# %s\n# %s\n# %s\n", question.Group, question.Name, question.Url)
-		}
-
-		if question == nil || question.Interactive {
-			// in this case we should just run the file and forward stdin and stdout
-			// all the other cases we send test cases ourselves
+		switch method {
+		case IN_METHOD_STDIN:
 			c := exec.Command("./temp")
 			c.Stdin = cmd.InOrStdin()
 			c.Stdout = cmd.OutOrStdout()
 			c.Stderr = cmd.OutOrStderr()
 			err := c.Run()
 			if err != nil {
-				fmt.Println("!!!!!!!! Runtime Error")
-				fmt.Println(err.Error())
+				printError("Runtime Error", err.Error());
 			}
-			return
-		}else{
+		case IN_METHOD_FILE:
+			c := exec.Command("./temp")
+			c.Stdin = strings.NewReader(inTxtContents)
+			c.Stdout = cmd.OutOrStdout()
+			c.Stderr = cmd.OutOrStderr()
+			err := c.Run()
+			if err != nil {
+				printError("Runtime Error", err.Error())
+			}
+		case IN_METHOD_SAMPLES:
 			passed := 0
 			for i, test := range question.Tests {
 				output, err := runTestCase(test.Input, question.TimeLimit)
 				if err != nil {
+					printRed(fmt.Sprintf("Test Case %d failed", i+1))
+					printError("Runtime Error", err.Error())
+					fmt.Println("#  Output:")
 					fmt.Print(output)
-					fmt.Println("!!!!!!!! Runtime Error")
-					fmt.Println(err.Error())
 					continue
 				}
-				if compareOutput(test.Output, output, i+1) {
+				if compareOutput(test.Output, output) {
+					printGreen(fmt.Sprintf("Test Case %d passed", i+1))
 					passed++
-				}else{
-					fmt.Println("Input:")
+				} else {
+					printRed(fmt.Sprintf("Test Case %d failed", i+1))
+					fmt.Println("\n#  Input:")
 					fmt.Print(test.Input)
-					fmt.Println("Expected Output:")
+					fmt.Println("\n#  Expected Output:")
 					fmt.Print(test.Output)
-					fmt.Println("Actual Output:")
+					fmt.Println("\n#  Actual Output:")
 					fmt.Print(output)
 				}
 			}
 
-			fmt.Printf("# Test Cases Passed: %d/%d\n", passed, len(question.Tests))
+			if(passed == len(question.Tests)){
+				printGreen("All Test Cases Passed ✅")
+			} else {
+				printRed(fmt.Sprintf("Passed %d out of %d test cases", passed, len(question.Tests)))
+			}
 		}
 	},
 }
