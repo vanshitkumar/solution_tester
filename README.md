@@ -1,6 +1,11 @@
 ## solution_tester
 This is a cli tool for testing your solutions against testcases fetched from various online judges(Codeforces, CodeChef, etc.). This tool was created for personal use only, you can fork and work on it as per your needs.
 
+### Installation
+```bash
+go install github.com/vanshitkumar/solution_tester@latest
+```
+
 ### working
 You start a *local judge* in your console, with the command `solution_tester judge`. This local judge will do the following, listens for problems from "Competative Companion" browser extension, at a time only one problem will be in his context. And listens for your submissions, you can submit your file using `solution_tester test <file_name>`, It compiles your submitted file using locally avialaible compiler and then executes it, also shows if there are any warnings/errors during compile time.
 
