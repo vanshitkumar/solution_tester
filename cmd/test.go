@@ -37,7 +37,8 @@ var (
 func printInputMethod(q *Question) int {
 	var hasInTxt bool
 	hasInTxt, inTxtContents = getInTxt()
-	if hasInTxt {
+	inTxtContents = strings.TrimSpace(inTxtContents)
+	if hasInTxt && inTxtContents != "" {
 		printNormal("Input Method: 'in.txt'")
 		return IN_METHOD_FILE
 	} else if q != nil && q.Interactive {
